@@ -17,6 +17,10 @@ Proyecto de ejemplo para un sistema web de registro, login y reserva de mesas us
   - Campos: `name`, `email`, `password` y `role`.
   - El campo `role` se usa para distinguir entre usuarios normales y administradores.
 
+- `userService.js`
+  - Servicio con funciones reutilizables para listar, crear, editar y eliminar usuarios.
+  - Centraliza la lógica de validación y hash de contraseñas.
+
 - `models/Table.js`
   - Modelo Mongoose para las mesas.
   - Campos: `tableNumber`, `game`, `level`, `maxPlayers`, `currentPlayers`, `tableType`, `reservedBy` y `createdAt`.
@@ -87,18 +91,46 @@ Proyecto de ejemplo para un sistema web de registro, login y reserva de mesas us
 5. Inicia la app con `npm start`.
 6. Abre `http://localhost:3000`.
 
+## Flujo de reservas
+
+- **Mesas vacías:** Muestran formulario completo para reservar (seleccionar juego, nivel y número de jugadores).
+- **Mesas con reserva iniciada:** Muestran solo el juego y nivel (no editables) con botón "Unirse" para que otros usuarios se unan hasta completar la mesa.
+- **Mesas llenas:** Muestran mensaje "Mesa llena".
+- **Mesas de evento:** Solo pueden ser reservadas por administradores.
+
 ## Roles y permisos
 
 - Usuario normal:
   - Puede registrarse e iniciar sesión.
-  - Puede reservar mesas disponibles.
+  - Puede iniciar reservas en mesas vacías (seleccionando juego, nivel y número de jugadores).
+  - Puede unirse a mesas ya reservadas por otros usuarios (solo botón "Unirse").
   - Al reservar, debe indicar juego y nivel.
 
 - Admin:
   - Además de las acciones de usuario normal, puede reservar mesas de tipo `evento`.
-  - Tiene acceso a un panel de administración para cambiar mesas y resetearlas.
+  - Tiene acceso a un panel de administración en `/admin` donde puede:
+    - crear nuevos usuarios,
+    - editar usuarios existentes,
+    - eliminar usuarios,
+    - cambiar el tipo de mesa (`disponible` / `evento`),
+    - resetear mesas.
 
-## Notas
+## Credenciales de prueba
 
-- Las reservas se guardan en la colección `reservations`.
-- Cada reserva incluye el usuario, la mesa, el juego, el nivel de dificultad, la cantidad de jugadores y la fecha de reserva.
+- **Usuario admin:**
+  - Email: `admin@example.com`
+  - Contraseña: `admin123`
+
+- **Usuario de prueba:**
+  - Email: `test@example.com`
+  - Contraseña: `test123`
+
+- **Usuario Juan Pérez:**
+  - Email: `juan@example.com`
+  - Contraseña: `user123`
+  - Juegos favoritos: Catan, Azul
+
+- **Usuario María García:**
+  - Email: `maria@example.com`
+  - Contraseña: `user456`
+  - Juegos favoritos: Ticket to Ride, Wingspan

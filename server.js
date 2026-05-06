@@ -8,6 +8,7 @@ const dotenv = require('dotenv');
 const User = require('./models/User');
 const Table = require('./models/Table');
 const Reservation = require('./models/Reservation');
+const userService = require('./userService');
 
 dotenv.config();
 
@@ -187,7 +188,12 @@ app.get('/tables', requireAuth, async (req, res) => {
 
   const tablesHTML = tables.map(t => {
     const spotsAvailable = t.maxPlayers - t.currentPlayers;
-    const canReserveTable = canReserve(t, req.session.userRole);
+    const isEmpty = t.currentPlayers === 0;
+    const isPartiallyReserved = t.currentPlayers > 0 && t.currentPlayers < t.maxPlayers;
+    const isFull = t.currentPlayers >= t.maxPlayers;
+    const reservedByCurrentUser = t.reservedBy && t.reservedBy.toString() === req.session.userId;
+    const canJoin = isPartiallyReserved && !reservedByCurrentUser && t.tableType !== 'evento';
+    const canReserveTable = isEmpty && canReserve(t, req.session.userRole);
     const indicatorColor = getIndicatorColor(t, req.session.userRole);
     const indicatorText = getIndicatorText(t, req.session.userRole);
     
@@ -237,7 +243,18 @@ app.get('/tables', requireAuth, async (req, res) => {
             <button type="submit" class="button-small" style="width: 100%;">Reservar</button>
           </form>
         </div>
-      ` : `<p style="color: #ef4444; font-size: 0.9rem; margin-top: 12px;">${t.tableType === 'evento' ? 'Solo admin puede reservar eventos' : 'Mesa llena'}</p>`}
+      ` : canJoin ? `
+        <div style="margin-top: 12px;">
+          <form action="/join" method="post">
+            <input type="hidden" name="tableId" value="${t._id.toString()}">
+            <button type="submit" class="button-small" style="width: 100%;">Unirse</button>
+          </form>
+        </div>
+      ` : reservedByCurrentUser ? `
+        <p style="color: #facc15; font-size: 0.9rem; margin-top: 12px;">Ya formas parte de esta mesa.</p>
+      ` : `
+        <p style="color: #ef4444; font-size: 0.9rem; margin-top: 12px;">${t.tableType === 'evento' ? 'Solo admin puede reservar eventos' : 'Mesa llena'}</p>
+      `}
     </div>
   `;
   }).join('');
@@ -376,6 +393,45 @@ app.post('/reserve', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/join', requireAuth, async (req, res) => {
+  const { tableId } = req.body;
+  try {
+    const table = await Table.findById(tableId);
+    if (!table) {
+      return res.redirect('/tables?error=Mesa no encontrada');
+    }
+
+    if (table.tableType === 'evento' && req.session.userRole !== 'admin') {
+      return res.redirect('/tables?error=Solo administradores pueden unirse a eventos');
+    }
+
+    if (table.currentPlayers <= 0 || table.currentPlayers >= table.maxPlayers) {
+      return res.redirect('/tables?error=Mesa no disponible para unirse');
+    }
+
+    if (table.reservedBy && table.reservedBy.toString() === req.session.userId) {
+      return res.redirect('/tables?error=Ya formas parte de esta mesa');
+    }
+
+    table.currentPlayers += 1;
+    await table.save();
+
+    const reservation = new Reservation({
+      table: table._id,
+      user: req.session.userId,
+      game: table.game,
+      level: table.level,
+      numPlayers: 1,
+    });
+    await reservation.save();
+
+    res.redirect('/tables?success=Te has unido a la mesa');
+  } catch (error) {
+    console.error('Error al unirse:', error);
+    res.redirect('/tables?error=Error al unirse a la mesa');
+  }
+});
+
 app.post('/admin/toggle-event', requireAdmin, async (req, res) => {
   const { tableId } = req.body;
   try {
@@ -394,35 +450,149 @@ app.post('/admin/toggle-event', requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/admin/reset-table', requireAdmin, async (req, res) => {
-  const { tableId } = req.body;
+app.post('/admin/users/create', requireAdmin, async (req, res) => {
+  const { name, email, password, role, favorites } = req.body;
   try {
-    const table = await Table.findById(tableId);
-    if (!table) {
-      return res.redirect('/admin?error=Mesa no encontrada');
-    }
-    
-    table.game = null;
-    table.level = null;
-    table.currentPlayers = 0;
-    table.reservedBy = null;
-    await table.save();
-    
-    res.redirect('/admin?success=Mesa reseteada');
+    const favoritesList = favorites
+      ? favorites
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : [];
+
+    await userService.createUser({
+      name,
+      email,
+      password,
+      role: role || 'user',
+      favorites: favoritesList,
+    });
+
+    res.redirect('/admin?success=Usuario creado correctamente');
   } catch (error) {
-    console.error('Error al resetear:', error);
-    res.redirect('/admin?error=Error al resetear mesa');
+    console.error('Error creando usuario:', error);
+    res.redirect(`/admin?error=${encodeURIComponent(error.message)}`);
+  }
+});
+
+app.get('/admin/user/edit/:id', requireAdmin, async (req, res) => {
+  try {
+    const user = await userService.getUserById(req.params.id);
+    if (!user) {
+      return res.redirect('/admin?error=Usuario no encontrado');
+    }
+
+    const favoritesValue = (user.favorites || []).join(', ');
+
+    res.send(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Editar Usuario - Admin</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="container" style="max-width: 800px;">
+    <h1>Editar usuario</h1>
+    <form action="/admin/users/update" method="post" style="display: grid; gap: 16px;">
+      <input type="hidden" name="userId" value="${user._id.toString()}" />
+      <label>
+        Nombre
+        <input type="text" name="name" value="${user.name}" required />
+      </label>
+      <label>
+        Correo
+        <input type="email" name="email" value="${user.email}" required />
+      </label>
+      <label>
+        Rol
+        <select name="role" required>
+          <option value="user" ${user.role === 'user' ? 'selected' : ''}>Usuario</option>
+          <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Administrador</option>
+        </select>
+      </label>
+      <label>
+        Contraseña (dejar en blanco para mantenerla)
+        <input type="password" name="password" placeholder="Nueva contraseña" />
+      </label>
+      <label>
+        Juegos favoritos
+        <input type="text" name="favorites" value="${favoritesValue}" placeholder="Catan, Azul" />
+      </label>
+      <button type="submit" class="button">Guardar cambios</button>
+    </form>
+    <a class="button secondary" href="/admin" style="margin-top: 20px; display: inline-block;">Volver al panel</a>
+  </main>
+</body>
+</html>`);
+  } catch (error) {
+    console.error('Error cargando usuario para editar:', error);
+    res.redirect('/admin?error=Error al cargar el usuario');
+  }
+});
+
+app.post('/admin/users/update', requireAdmin, async (req, res) => {
+  const { userId, name, email, password, role, favorites } = req.body;
+  try {
+    const favoritesList = favorites
+      ? favorites
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean)
+      : [];
+
+    await userService.updateUser(userId, {
+      name,
+      email,
+      password: password || undefined,
+      role,
+      favorites: favoritesList,
+    });
+
+    res.redirect('/admin?success=Usuario actualizado correctamente');
+  } catch (error) {
+    console.error('Error actualizando usuario:', error);
+    res.redirect(`/admin?error=${encodeURIComponent(error.message)}`);
+  }
+});
+
+app.post('/admin/users/delete', requireAdmin, async (req, res) => {
+  const { userId } = req.body;
+  try {
+    if (req.session.userId === userId) {
+      return res.redirect('/admin?error=No puedes eliminar tu propia cuenta desde el panel de admin');
+    }
+
+    await userService.deleteUser(userId);
+    res.redirect('/admin?success=Usuario eliminado correctamente');
+  } catch (error) {
+    console.error('Error eliminando usuario:', error);
+    res.redirect(`/admin?error=${encodeURIComponent(error.message)}`);
   }
 });
 
 app.get('/admin', requireAdmin, async (req, res) => {
-  const users = await User.find({}, 'name email role -_id');
+  const users = await userService.listUsers();
   const tables = await Table.find({});
+  const statusMessage = req.query.error
+    ? `<p style="color: #f87171;">${req.query.error}</p>`
+    : req.query.success
+    ? `<p style="color: #4ade80;">${req.query.success}</p>`
+    : '';
   
   const usersList = users.map(u => `<tr>
     <td>${u.name}</td>
     <td>${u.email}</td>
     <td><span style="background: ${u.role === 'admin' ? '#dc2626' : '#2563eb'}; color: white; padding: 4px 12px; border-radius: 4px;">${u.role}</span></td>
+    <td>${(u.favorites || []).join(', ') || '-'}</td>
+    <td>
+      <a href="/admin/user/edit/${u._id.toString()}" style="color: #38bdf8; text-decoration: underline; margin-right: 12px;">Editar</a>
+      <form action="/admin/users/delete" method="post" style="display: inline; margin: 0;">
+        <input type="hidden" name="userId" value="${u._id.toString()}" />
+        <button type="submit" style="background: none; border: none; color: #f97316; cursor: pointer; text-decoration: underline; padding: 0;">Eliminar</button>
+      </form>
+    </td>
   </tr>`).join('');
 
   const tablesList = tables.map(t => `<tr>
@@ -457,44 +627,85 @@ app.get('/admin', requireAdmin, async (req, res) => {
     th, td { padding: 12px; text-align: left; border-bottom: 1px solid #475569; font-size: 0.9rem; }
     th { background: #1e293b; font-weight: 600; }
     tr:hover { background: rgba(148, 163, 184, 0.1); }
+    .form-grid { display: grid; gap: 16px; }
+    .admin-card { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 14px; padding: 20px; margin-top: 20px; }
+    .admin-card label { display: block; font-size: 0.95rem; margin-bottom: 6px; }
+    .admin-card input, .admin-card select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0; }
   </style>
 </head>
 <body>
   <main class="container" style="max-width: 1200px;">
     <h1>Panel de Administrador</h1>
-    
-    <h2>Usuarios registrados</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Nombre</th>
-          <th>Correo</th>
-          <th>Rol</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${usersList}
-      </tbody>
-    </table>
+    ${statusMessage}
 
-    <h2>Mesas</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Mesa</th>
-          <th>Juego</th>
-          <th>Nivel</th>
-          <th>Jugadores</th>
-          <th>Tipo</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${tablesList}
-      </tbody>
-    </table>
+    <section class="admin-card">
+      <h2>Crear nuevo usuario</h2>
+      <form action="/admin/users/create" method="post" class="form-grid">
+        <label>
+          Nombre
+          <input type="text" name="name" required />
+        </label>
+        <label>
+          Correo
+          <input type="email" name="email" required />
+        </label>
+        <label>
+          Contraseña
+          <input type="password" name="password" required />
+        </label>
+        <label>
+          Rol
+          <select name="role" required>
+            <option value="user">Usuario</option>
+            <option value="admin">Administrador</option>
+          </select>
+        </label>
+        <label>
+          Juegos favoritos
+          <input type="text" name="favorites" placeholder="Catan, Azul, Carcassonne" />
+        </label>
+        <button type="submit" class="button">Crear usuario</button>
+      </form>
+    </section>
 
-    <div style="margin-top: 30px;">
+    <section class="admin-card">
+      <h2>Usuarios registrados</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Correo</th>
+            <th>Rol</th>
+            <th>Favoritos</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${usersList}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="admin-card">
+      <h2>Mesas</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Mesa</th>
+            <th>Juego</th>
+            <th>Nivel</th>
+            <th>Jugadores</th>
+            <th>Tipo</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tablesList}
+        </tbody>
+      </table>
+    </section>
+
+    <div style="margin-top: 30px; display: flex; gap: 12px; flex-wrap: wrap;">
       <a class="button" href="/profile">Volver al perfil</a>
       <a class="button secondary" href="/logout">Cerrar sesión</a>
     </div>
