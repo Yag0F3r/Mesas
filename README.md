@@ -14,8 +14,9 @@ Proyecto de ejemplo para un sistema web de registro, login y reserva de mesas us
 
 - `models/User.js`
   - Modelo Mongoose para los usuarios.
-  - Campos: `name`, `email`, `password` y `role`.
+  - Campos: `name`, `password` y `role`.
   - El campo `role` se usa para distinguir entre usuarios normales y administradores.
+  - El `name` es único y se usa como identificador para login.
 
 - `userService.js`
   - Servicio con funciones reutilizables para listar, crear, editar y eliminar usuarios.
