@@ -87,18 +87,18 @@ app.get('/profile', requireAuth, (req, res) => {
 });
 
 app.post('/register', async (req, res) => {
-  const { name, email, password } = req.body;
-  if (!name || !email || !password) {
+  const { name, password } = req.body;
+  if (!name || !password) {
     return res.redirect('/register.html?error=Todos los campos son obligatorios');
   }
 
-  const existingUser = await User.findOne({ email });
+  const existingUser = await User.findOne({ name });
   if (existingUser) {
-    return res.redirect('/register.html?error=El correo ya está registrado');
+    return res.redirect('/register.html?error=El nombre ya está registrado');
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
-  const user = new User({ name, email, password: hashedPassword, role: 'user', favorites: [] });
+  const user = new User({ name, password: hashedPassword, role: 'user', favorites: [] });
   await user.save();
 
   req.session.userId = user._id;
@@ -109,19 +109,19 @@ app.post('/register', async (req, res) => {
 });
 
 app.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
+  const { name, password } = req.body;
+  if (!name || !password) {
     return res.redirect('/login.html?error=Todos los campos son obligatorios');
   }
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ name });
   if (!user) {
-    return res.redirect('/login.html?error=Correo o contraseña incorrectos');
+    return res.redirect('/login.html?error=Nombre o contraseña incorrectos');
   }
 
   const passwordMatch = await bcrypt.compare(password, user.password);
   if (!passwordMatch) {
-    return res.redirect('/login.html?error=Correo o contraseña incorrectos');
+    return res.redirect('/login.html?error=Nombre o contraseña incorrectos');
   }
 
   req.session.userId = user._id;
@@ -451,7 +451,7 @@ app.post('/admin/toggle-event', requireAdmin, async (req, res) => {
 });
 
 app.post('/admin/users/create', requireAdmin, async (req, res) => {
-  const { name, email, password, role, favorites } = req.body;
+  const { name, password, role, favorites } = req.body;
   try {
     const favoritesList = favorites
       ? favorites
@@ -462,7 +462,6 @@ app.post('/admin/users/create', requireAdmin, async (req, res) => {
 
     await userService.createUser({
       name,
-      email,
       password,
       role: role || 'user',
       favorites: favoritesList,
@@ -502,10 +501,6 @@ app.get('/admin/user/edit/:id', requireAdmin, async (req, res) => {
         <input type="text" name="name" value="${user.name}" required />
       </label>
       <label>
-        Correo
-        <input type="email" name="email" value="${user.email}" required />
-      </label>
-      <label>
         Rol
         <select name="role" required>
           <option value="user" ${user.role === 'user' ? 'selected' : ''}>Usuario</option>
@@ -533,7 +528,7 @@ app.get('/admin/user/edit/:id', requireAdmin, async (req, res) => {
 });
 
 app.post('/admin/users/update', requireAdmin, async (req, res) => {
-  const { userId, name, email, password, role, favorites } = req.body;
+  const { userId, name, password, role, favorites } = req.body;
   try {
     const favoritesList = favorites
       ? favorites
@@ -544,7 +539,6 @@ app.post('/admin/users/update', requireAdmin, async (req, res) => {
 
     await userService.updateUser(userId, {
       name,
-      email,
       password: password || undefined,
       role,
       favorites: favoritesList,
@@ -583,7 +577,6 @@ app.get('/admin', requireAdmin, async (req, res) => {
   
   const usersList = users.map(u => `<tr>
     <td>${u.name}</td>
-    <td>${u.email}</td>
     <td><span style="background: ${u.role === 'admin' ? '#dc2626' : '#2563eb'}; color: white; padding: 4px 12px; border-radius: 4px;">${u.role}</span></td>
     <td>${(u.favorites || []).join(', ') || '-'}</td>
     <td>
@@ -646,10 +639,6 @@ app.get('/admin', requireAdmin, async (req, res) => {
           <input type="text" name="name" required />
         </label>
         <label>
-          Correo
-          <input type="email" name="email" required />
-        </label>
-        <label>
           Contraseña
           <input type="password" name="password" required />
         </label>
@@ -674,7 +663,6 @@ app.get('/admin', requireAdmin, async (req, res) => {
         <thead>
           <tr>
             <th>Nombre</th>
-            <th>Correo</th>
             <th>Rol</th>
             <th>Favoritos</th>
             <th>Acciones</th>

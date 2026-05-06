@@ -2,27 +2,26 @@ const bcrypt = require('bcrypt');
 const User = require('./models/User');
 
 async function listUsers() {
-  return User.find({}, 'name email role favorites');
+  return User.find({}, 'name role favorites');
 }
 
 async function getUserById(id) {
-  return User.findById(id, 'name email role favorites');
+  return User.findById(id, 'name role favorites');
 }
 
-async function createUser({ name, email, password, role = 'user', favorites = [] }) {
-  if (!name || !email || !password) {
-    throw new Error('name, email y password son obligatorios');
+async function createUser({ name, password, role = 'user', favorites = [] }) {
+  if (!name || !password) {
+    throw new Error('name y password son obligatorios');
   }
 
-  const existingUser = await User.findOne({ email });
+  const existingUser = await User.findOne({ name });
   if (existingUser) {
-    throw new Error('El correo ya está registrado');
+    throw new Error('El nombre ya está registrado');
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
   const user = new User({
     name: name.trim(),
-    email: email.trim().toLowerCase(),
     password: hashedPassword,
     role,
     favorites,
@@ -31,21 +30,17 @@ async function createUser({ name, email, password, role = 'user', favorites = []
   return user.save();
 }
 
-async function updateUser(id, { name, email, password, role, favorites }) {
+async function updateUser(id, { name, password, role, favorites }) {
   const user = await User.findById(id);
   if (!user) {
     throw new Error('Usuario no encontrado');
   }
 
-  if (email && email.trim().toLowerCase() !== user.email) {
-    const existingUser = await User.findOne({ email: email.trim().toLowerCase() });
+  if (name && name.trim() !== user.name) {
+    const existingUser = await User.findOne({ name: name.trim() });
     if (existingUser && existingUser._id.toString() !== id.toString()) {
-      throw new Error('El correo ya está registrado');
+      throw new Error('El nombre ya está registrado');
     }
-    user.email = email.trim().toLowerCase();
-  }
-
-  if (name) {
     user.name = name.trim();
   }
 
